@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"runtime"
 	"sync"
 	"time"
@@ -17,9 +18,15 @@ type (
 	pool struct {
 		timeOutChecker timeOutChecker
 		size, cur      int
+		status         atomic.Int32
 		workerList     chan run
 		lock           sync.Mutex
 	}
+)
+
+const (
+	running int32 = iota + 1
+	shutdown
 )
 
 func (p *pool) check() {
@@ -55,8 +62,16 @@ func NewPool(n int, timeOut int64) (p *pool) {
 		workerList: make(chan run, 20),
 	}
 }
+func (p *pool) ShutDown() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	p.status.Store(shutdown)
+}
 
 func (p *pool) AddTask(ctx context.Context, task run) {
+	if p.status.Load() == shutdown {
+		return
+	}
 	if p.cur >= p.size {
 		p.workerList <- task
 		return
@@ -80,7 +95,7 @@ func (p *pool) AddTask(ctx context.Context, task run) {
 				}()
 			case <-p.timeOutChecker.checker:
 				fmt.Println("consume", len(p.timeOutChecker.checker))
-				if time.Now().Unix()-lastActiveTime >= p.timeOutChecker.timeOut {
+				if (p.status.Load() == shutdown && len(p.workerList) == 0) || (p.timeOutChecker.timeOut != 0 && time.Now().Unix()-lastActiveTime >= p.timeOutChecker.timeOut) {
 					p.lock.Lock()
 					p.cur--
 					p.lock.Unlock()
@@ -93,7 +108,8 @@ func (p *pool) AddTask(ctx context.Context, task run) {
 	}(p.cur)
 	p.cur++
 	p.workerList <- task
-	if p.cur == 1 && p.timeOutChecker.timeOut > 0 {
+	if p.cur == 1 {
+		p.status.Store(running)
 		go p.check()
 	}
 	p.lock.Unlock()
