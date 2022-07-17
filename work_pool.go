@@ -2,7 +2,6 @@ package utils
 
 import (
 	"errors"
-	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,19 +55,10 @@ func (p *pool) getBlocking() int64 {
 
 func NewPool(opts ...OptionF) (p *pool) {
 	var (
-		opt  PoolOption
+		opt  = loadOptions(opts)
 		lock = &sync.RWMutex{}
 		cond = sync.NewCond(lock)
 	)
-	for _, f := range opts {
-		f(&opt)
-	}
-	if opt.ttl <= 0 {
-		opt.ttl = time.Second
-	}
-	if opt.capacity <= 0 {
-		opt.capacity = math.MaxInt64
-	}
 
 	p = &pool{
 		status:      on,
@@ -80,6 +70,7 @@ func NewPool(opts ...OptionF) (p *pool) {
 		workerCache: &sync.Pool{
 			New: func() interface{} {
 				worker := &Worker{
+					panicHandler:  opt.panicHandler,
 					closeCallBack: opt.workerCloseCallBack,
 					task:          make(chan task, 1),
 					pool:          p,

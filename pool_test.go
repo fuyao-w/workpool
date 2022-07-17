@@ -55,10 +55,7 @@ func TestBroadcast(t *testing.T) {
 		WithCapacity(5),
 		//WithTTl(5*time.Second),
 	)
-	go func() {
-		time.Sleep(time.Millisecond)
-		p.Close()
-	}()
+
 	for i := 0; i < 1000; i++ {
 		i := i
 		t.Log(p.Submit(func() {
