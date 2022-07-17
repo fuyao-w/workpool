@@ -1,4 +1,4 @@
-package utils
+package work_pool
 
 import (
 	"time"
