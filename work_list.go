@@ -5,12 +5,14 @@ import (
 )
 
 type (
+	// WorkPool 池接口
 	WorkPool interface {
 		push(worker *Worker, mockBeginAt ...time.Time)
 		pop() *Worker
 		len() int
-		truncateExpiredItems(endTime time.Time) []*Worker
+		truncateExpiredItems(endTime time.Time) []*Worker //清理已过期的协程
 	}
+	// WorkStack 池的栈实现
 	WorkStack struct {
 		items []*Worker
 	}
@@ -38,6 +40,7 @@ func (w *WorkStack) len() int {
 	return len(w.items)
 }
 
+// search 二分搜索，加速查找已过期的池
 func (w *WorkStack) search(expiredAt time.Time) int {
 	var begin, end = 0, len(w.items) - 1
 	for begin <= end {

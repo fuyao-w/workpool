@@ -9,12 +9,13 @@ import (
 
 type (
 	PoolOption struct {
-		ttl                        time.Duration
-		nonBlocking                bool
-		capacity, maxBlockingTasks int64
-		workerCloseCallBack        func(*Worker)
-		panicHandler               PanicHandler
-		logger                     Logger
+		ttl                 time.Duration // 协程空闲最长时间
+		nonBlocking         bool          // 非阻塞提交任务，协程池满了会立即返回失败
+		capacity            int64         // 池容量
+		maxBlockingTasks    int64         // 池满的时候，最大可阻塞的任务数
+		workerCloseCallBack func(*Worker) // 协程关闭的回调
+		panicHandler        PanicHandler  // panic 处理函数
+		logger              Logger        //日志组件
 	}
 	OptionF func(opt *PoolOption)
 	Logger  interface {

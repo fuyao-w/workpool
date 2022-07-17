@@ -20,17 +20,17 @@ var (
 
 type (
 	pool struct {
-		status                    int32
-		closeSingle               chan struct{}
-		runningSize, blockingSize int64
-		workPool                  WorkPool
-		opt                       *PoolOption
+		status                    int32         // 池状态 [on off]
+		closeSingle               chan struct{} // 池关闭通知
+		runningSize, blockingSize int64         // runningSize 正在执行任务数量 ，blockingSize 阻塞任务刷领
+		workPool                  WorkPool      // 协程池
+		opt                       *PoolOption   // options 参数
 		lock                      *sync.RWMutex
 		workerCache               *sync.Pool
-		cond                      *sync.Cond
+		cond                      *sync.Cond // 用于同步任务
 	}
 
-	task func()
+	task func() //任务
 )
 
 func (p *pool) incrRunning() {
@@ -84,6 +84,14 @@ func NewPool(opts ...OptionF) (p *pool) {
 	return
 }
 
+/*
+	Submit 提交任务
+	如果池已关闭则返回 ErrPoolClose
+	如果提交任务被阻塞，在等待期间池关闭则会返回 ErrPoolClose
+	如果任务为空则返回 ErrTaskIsNull
+	如果池已满,并且非阻塞则返回 ErrWorkerSizeOverflow
+
+*/
 func (p *pool) Submit(task task) error {
 	if task == nil {
 		return ErrTaskIsNull
@@ -99,6 +107,7 @@ func (p *pool) Submit(task task) error {
 	return nil
 }
 
+// retrieveWorker 获取可用的协程，如果不够会新创建
 func (p *pool) retrieveWorker() (w *Worker, _ error) {
 	genWorker := func() {
 		w = p.workerCache.Get().(*Worker)
@@ -107,16 +116,18 @@ func (p *pool) retrieveWorker() (w *Worker, _ error) {
 
 	p.lock.Lock()
 
+	// 池子里有直接返回
 	w = p.workPool.pop()
 	if w != nil {
 		p.lock.Unlock()
 		return
 	}
+
 	switch {
-	case p.getRunning() < p.opt.capacity:
+	case p.getRunning() < p.opt.capacity: //池子没有，但是还没到容量则创建
 		p.lock.Unlock()
 		genWorker()
-	default:
+	default: //否则等待
 		if p.opt.nonBlocking {
 			p.lock.Unlock()
 			return nil, ErrWorkerSizeOverflow
@@ -129,6 +140,7 @@ func (p *pool) retrieveWorker() (w *Worker, _ error) {
 			p.incrBlocking()
 			p.cond.Wait()
 			p.decrBlocking()
+			// fast fail
 			if p.getStatus() == off {
 				p.lock.Unlock()
 				return nil, ErrPoolClose
@@ -148,19 +160,27 @@ func (p *pool) retrieveWorker() (w *Worker, _ error) {
 
 	return
 }
+
+/*
+	Close 立即关闭池，当前未执行的任务会直接返回失败
+*/
 func (p *pool) Close() {
 	if !atomic.CompareAndSwapInt32(&p.status, on, off) {
 		return
 	}
 	close(p.closeSingle)
 	p.closeWorker(0)
-	p.cond.Broadcast()
+	p.cond.Broadcast() //通知等待的协程立即结束任务
 }
 
 func (p *pool) getStatus() int32 {
 	return atomic.LoadInt32(&p.status)
 }
 
+/*
+	closeWorker 清理池中的协程
+	expireAt time.Duration 该时间以及之前就在池中的协程将会被清理
+*/
 func (p *pool) closeWorker(expireAt time.Duration) {
 
 	p.lock.Lock()
@@ -172,6 +192,7 @@ func (p *pool) closeWorker(expireAt time.Duration) {
 	}
 }
 
+// purgeWorker 协程池清理函数，定期清理达到最大空闲时间的任务，当池关闭的时候会直接返回，剩下的任务由 Close 函数处理
 func (p *pool) purgeWorker() {
 	sticker := time.NewTicker(p.opt.ttl)
 	defer sticker.Stop()
@@ -180,7 +201,7 @@ func (p *pool) purgeWorker() {
 		case <-sticker.C:
 			p.closeWorker(-p.opt.ttl)
 			if p.getRunning() == 0 {
-				p.cond.Broadcast()
+				p.cond.Broadcast() //通知等待的任务进行下一步处理
 			}
 		case <-p.closeSingle:
 			return
@@ -188,6 +209,11 @@ func (p *pool) purgeWorker() {
 	}
 }
 
+/*
+	restoreWorker 向池归还工作协程，并通知其他阻塞的任务
+	w *Worker  待归还的协程
+	return 当前协程不用归还池的时候返回 true ,否则返回false
+*/
 func (p *pool) restoreWorker(w *Worker) bool {
 	if p.getStatus() == off || p.getRunning() > p.opt.capacity {
 		return true
