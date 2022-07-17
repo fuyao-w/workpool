@@ -26,10 +26,10 @@ func (w *Worker) run() {
 				}
 			}
 			w.pool.decrRunning()
-			w.pool.workerCache.Put(w)
 			if w.closeCallBack != nil {
 				w.closeCallBack(w)
 			}
+			w.pool.workerCache.Put(w)
 		}()
 
 		for {
