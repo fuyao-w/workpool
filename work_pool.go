@@ -23,7 +23,7 @@ type (
 		status                    int32         // 池状态 [on off]
 		closeSingle               chan struct{} // 池关闭通知
 		runningSize, blockingSize int64         // runningSize 正在执行任务数量 ，blockingSize 阻塞任务刷领
-		workPool                  WorkPool      // 协程池
+		workPool                  WorkPool      // 空闲协程池
 		opt                       *PoolOption   // options 参数
 		lock                      *sync.RWMutex
 		workerCache               *sync.Pool
